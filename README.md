@@ -32,18 +32,18 @@
         step (l :: tail) (rhs ++ tail).
   ```
 * **Цепочка слов:**
-```coq
-Definition chain (f : nat -> word) : Prop :=
-    forall n, step (f n) (f (S n)).
-```
+  ```coq
+  Definition chain (f : nat -> word) : Prop :=
+      forall n, step (f n) (f (S n)).
+  ```
 * **Неизменность суффикса:**
-```coq
-Definition tail_preserved (f : nat -> word) (n : nat) (suffix : word) : Prop :=
-    exists (l : letter) (rhs middle : word),
-      In (l, rhs) G /\
-      f n = l :: middle ++ suffix /\       (* до шага *)
-      f (S n) = rhs ++ middle ++ suffix.   (* после шага *)
-```
+  ```coq
+  Definition tail_preserved (f : nat -> word) (n : nat) (suffix : word) : Prop :=
+      exists (l : letter) (rhs middle : word),
+        In (l, rhs) G /\
+        f n = l :: middle ++ suffix /\       (* до шага *)
+        f (S n) = rhs ++ middle ++ suffix.   (* после шага *)
+  ```
 
 * **Пара Турчина:**
   Два слова $\omega_i$ и $\omega_j$ ($i < j$) образуют пару Турчина $\omega_i \triangleleft \omega_j$, если $\omega_i = v\omega'$ и $\omega_j = v v' \omega'$, где голова $v$ не пуста, а хвост $\omega'$  неизменен на всём отрезке цепочки от $i$ до $j-1$.  
