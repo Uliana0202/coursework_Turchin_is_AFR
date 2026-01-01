@@ -1,5 +1,5 @@
 -Q . ""
 Turchin_Defs.v
-Repetition_Is_Turchin.v
+Turchin_Lib.v
 Turchin_Growth.v
 Main.v
