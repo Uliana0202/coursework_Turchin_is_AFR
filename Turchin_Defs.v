@@ -1,18 +1,11 @@
-(*
-rm *.vo *.vok *.vos *.glob 
-coqc -Q . Turchin Turchin_Defs.v
-*)
-
 Require Import Coq.Lists.List.
 Require Import Coq.Arith.Arith.
 Import ListNotations.
 
 Section Definitions.
-  (* Тип для буквы *)
   Variable letter : Set.
   Variable letter_eq_dec : forall x y : letter, {x = y} + {x <> y}.
   
-  (* Конечность алфавита *)
   Variable Finite_Sigma : list letter.
   Variable Is_Finite : forall x : letter, In x Finite_Sigma.
   
@@ -26,8 +19,8 @@ Section Definitions.
   Inductive step : word -> word -> Prop :=
     | step_intro : forall (l : letter) (rhs tail : word),
         In (l, rhs) G ->
-        (* l :: tail — это исходное слово (gamma ++ omega) *)
-        (* rhs ++ tail — это новое слово (omega' ++ omega) *)
+        (* l :: tail - исходное слово  *)
+        (* rhs ++ tail - новое слово *)
         step (l :: tail) (rhs ++ tail).
 
   Definition chain (f : nat -> word) : Prop :=
@@ -39,17 +32,17 @@ Section Definitions.
   Definition tail_preserved (f : nat -> word) (n : nat) (suffix : word) : Prop :=
     exists (l : letter) (rhs middle : word),
       In (l, rhs) G /\
-      f n = l :: middle ++ suffix /\       (* До шага *)
-      f (S n) = rhs ++ middle ++ suffix.   (* После шага *)
+      f n = l :: middle ++ suffix /\       (* до шага *)
+      f (S n) = rhs ++ middle ++ suffix.   (* после шага *)
 
   Definition is_turchin_pair (f : nat -> word) (i j : nat) : Prop :=
     i < j /\
-    exists (phi psi theta : word),
-      phi <> [] /\                          (* |v| > 0 *)
-      f i = phi ++ theta /\
-      f j = phi ++ psi ++ theta /\
-      (* theta неизменна на каждом шаге от i до j-1 *)
-      (forall k, i <= k < j -> tail_preserved f k theta).
+    exists (v v' w' : word),
+      v <> [] /\
+      f i = v ++ w' /\
+      f j = v ++ v' ++ w' /\
+      (* w' неизменна на каждом шаге от i до j-1 *)
+      (forall k, i <= k < j -> tail_preserved f k w').
     
   Definition almost_full (R : word -> word -> Prop) : Prop :=
     forall (f : nat -> word),

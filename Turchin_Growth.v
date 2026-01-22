@@ -4,27 +4,23 @@ Require Import Coq.Arith.PeanoNat.
 Require Import Coq.Logic.Classical.
 Require Import Coq.Logic.Classical_Prop.
 From Coq Require Import Lia.
+Require Import Coq.Sorting.Sorted.
 Import ListNotations.
 
 Require Import Turchin_Defs.
-Require Import Repetition_Is_Turchin.
+Require Import Turchin_Lib.
 
 Section Growth_Proof.
-
   Variable letter : Set.
   Variable letter_eq_dec : forall x y : letter, {x = y} + {x <> y}.
   Variable G : grammar letter.
+  
   Variable Finite_Sigma : list letter.
   Variable Is_Finite : forall x : letter, In x Finite_Sigma.
 
-  (** ПОКА ТАК :( *)
-  Definition NonShortening (G : grammar letter) : Prop :=
-    forall lhs rhs, In (lhs, rhs) G -> length rhs >= 1.
-   
+  (* СВОЙСТВА ШАГА И LOW WATER MARK (LWM) *)
 
-  Variable G_NonShort : NonShortening G.
-  
-  (* СТАБИЛЬНОСТЬ СУФФИКСА *)
+  (* Стабильность суффикса на одном шаге *)
   Lemma step_preserves_tail :
     forall w1 w2 l suffix,
     step G w1 w2 ->
@@ -40,7 +36,7 @@ Section Growth_Proof.
     reflexivity.
   Qed.
 
-  (* НЕОГРАНИЧЕННЫЙ РОСТ *)
+  (* LWM: такой индекс k, что длина слова никогда больше не падает ниже |f(k)| *)
   Definition is_low_water_mark (f : nat -> word letter) (k : nat) : Prop :=
     forall t, t >= k -> length (f t) >= length (f k).
 
@@ -66,28 +62,24 @@ Section Growth_Proof.
         lia.
   Qed.
 
-  (* Если последовательность растет неограниченно, LWM существуют сколь угодно далеко. *)
+  (* Если последовательность растет неограниченно, LWM существуют сколь угодно далеко *)
   Lemma exists_LWM :
     forall f, chain G f ->
     (forall N, exists i, forall j, j > i -> length (f j) > N) ->
     forall start_idx, exists k, k >= start_idx /\ is_low_water_mark f k.
   Proof.
     intros f Hchain Hgrow start_idx.
-    (* Рассмотрим множество длин хвоста последовательности *)
     set (S_lengths := fun len => exists t, t >= start_idx /\ length (f t) = len).
 
-    assert (H_non_empty: exists len, S_lengths len). (* Оно не пусто *)
+    assert (H_non_empty: exists len, S_lengths len). 
     { exists (length (f start_idx)). exists start_idx. split; [lia | reflexivity]. }
     
-    (* Найдем минимум m этого множества *)
     destruct (exists_min_in_set S_lengths H_non_empty) as [min_len [H_in_S H_is_min]].
     destruct H_in_S as [k [H_ge_start H_len_k]].
     
-    (*  Индекс k, на котором достигается минимум - это LWM *)
     exists k. split.
     - assumption.
     - unfold is_low_water_mark. intros t H_ge_k.
-      (* t >= k >= start_idx, значит длина f t тоже в множестве S *)
       assert (H_in_S_t: S_lengths (length (f t))).
       { exists t. split; [lia | reflexivity]. }
       specialize (H_is_min (length (f t)) H_in_S_t).
@@ -95,7 +87,9 @@ Section Growth_Proof.
       assumption.
   Qed.
 
-  (* Если k — LWM, и f(k) = l :: suffix, то suffix сохраняется навсегда. *)
+  (* СОХРАНЕНИЕ СУФФИКСА *)
+
+  (* Если k — LWM, и f(k) = l :: suffix, то suffix сохраняется навсегда *)
   Lemma preserves_suffix_forever :
     forall f k l suffix,
     chain G f ->
@@ -113,42 +107,32 @@ Section Growth_Proof.
       rewrite Nat.add_succ_r.
       specialize (Hchain (k + delta)).
       
-      (* f(k+delta) не пустое *)
       assert (H_non_empty: f (k + delta) <> []).
       {
-         pose proof (Hlwm (k + delta) (le_plus_l k delta)).
+         pose proof (Hlwm (k + delta) (Nat.le_add_r k delta)).
          rewrite Hdecomp in H. simpl in H.
          intro Heq. rewrite Heq in H. simpl in H. lia.
       }
       
       destruct (f (k + delta)) as [| h t_prev] eqn:Hstructure; [contradiction|].
-      (* Получили f(k+delta) = h :: t_prev *)
-      (* И из гипотезы f(k+delta) = p_prev ++ suffix *)
 
       apply step_preserves_tail with (l := h) (suffix := t_prev) in Hchain; [| reflexivity].
       destruct Hchain as [rhs H_next_eq].
       
-      (* Докажем, что suffix является суффиксом t_prev *)
       assert (H_suffix_in_tprev : exists mid, t_prev = mid ++ suffix).
       {
          destruct p_prev as [| x xs].
-         - (* p_prev = []: тогда h :: t_prev = suffix. *)
-           simpl in H_prev.
-           
-           (* Доказываем противоречие через длины *)
+         - simpl in H_prev.
            exfalso.
-           pose proof (Hlwm (k + delta) (le_plus_l k delta)) as Hlen.
+           pose proof (Hlwm (k + delta) (Nat.le_add_r k delta)) as Hlen.
            rewrite Hstructure in Hlen. 
            rewrite Hdecomp in Hlen.
            rewrite H_prev in Hlen.
            simpl in Hlen.
            lia.
-           
-         - (* p_prev = x :: xs (не пустой) *)
-           simpl in H_prev.
+         - simpl in H_prev.
            injection H_prev as Hhead Htail.
-           exists xs. (* mid - это хвост p_prev *)
-           assumption.
+           exists xs. assumption.
       }
       
       destruct H_suffix_in_tprev as [mid H_mid].
@@ -159,34 +143,58 @@ Section Growth_Proof.
       reflexivity.
   Qed.
 
+  Lemma LWM_implies_trace_preservation : 
+    forall f k l suffix,
+    chain G f ->
+    is_low_water_mark f k ->
+    f k = l :: suffix ->
+    forall t, t >= k -> tail_preserved G f t suffix.
+  Proof.
+    intros f k l suffix Hchain Hlwm Hdecomp t Hge.
+    unfold tail_preserved.
+
+    pose proof (preserves_suffix_forever f k l suffix Hchain Hlwm Hdecomp t Hge) as [p Hp].
+    
+    assert (p <> []).
+    {
+      intro Hnil. subst p. simpl in Hp.
+      pose proof (Hlwm t Hge) as Hlen.
+      rewrite Hdecomp in Hlen. rewrite Hp in Hlen. simpl in Hlen. lia.
+    }
+    
+    destruct p as [| h mid]; [contradiction|].
+    rewrite Hp.
+    
+    specialize (Hchain t).
+    inversion Hchain as [l0 rhs tail Hin Hft Hfst].
+    rewrite Hp in Hft.
+    injection Hft as Hl0 Htail. subst l0 tail.
+    
+    exists h, rhs, mid.
+    repeat split; try assumption.
+  Qed.
+
+  (* Существование следующего LWM с строго большей длиной *)
+  Lemma exists_next_growing_LWM :
+    forall f k,
+    chain G f ->
+    (forall N, exists i, forall j, j > i -> length (f j) > N) ->
+    is_low_water_mark f k ->
+    exists k', k' > k /\ length (f k') > length (f k) /\ is_low_water_mark f k'.
+  Proof.
+    intros f k Hchain Hunbounded Hlwm.
+    destruct (Hunbounded (length (f k))) as [i H_large].
+    set (start := S (max k i)).
+    destruct (exists_LWM f Hchain Hunbounded start) as [k' [Hge_start Hlwm']].
+    
+    exists k'.
+    repeat split.
+    - unfold start in Hge_start. lia.
+    - apply H_large. unfold start in Hge_start. lia.
+    - assumption.
+  Qed.
+
   (* РОСТ -> ПАРА ТУРЧИНА *)
-
-  Lemma monotone_growth : forall f, chain G f -> (forall n, length (f n) <= length (f (S n))).
-  Proof.
-    intros f Hchain n.
-    specialize (Hchain n).
-    inversion Hchain as [l rhs tail Hin Hfn HfSn].
-    simpl.
-    rewrite app_length.
-    apply G_NonShort in Hin.
-    lia.
-  Qed.
-
-  Lemma le_trans_induction_bases : forall (f : nat -> nat) (start end_ : nat),
-    start <= end_ ->
-    (forall n, f n <= f (S n)) ->
-    f start <= f end_.
-  Proof.
-    intros f s e Hle Hstep.
-    induction e.
-    - assert (s = 0) by lia. subst. apply le_n.
-    - destruct (le_lt_dec s e).
-      + apply le_trans with (m := f e).
-        * apply IHe. assumption.
-        * apply Hstep.
-      + assert (s = S e) by lia. subst. apply le_n.
-  Qed.
-
 
   Theorem Growth_Implies_Turchin_Pair :
     forall f,
@@ -198,344 +206,189 @@ Section Growth_Proof.
   Proof.
     intros f Hchain Hnonempty Hunbounded.
 
-    (* Определим критическую длину M *)
-    set (M := 1).
-
-    (* Найдем LWM (k), где длина слова уже > M *)
-    destruct (Hunbounded M) as [start_idx H_growth_start].
-    pose proof (exists_LWM f Hchain Hunbounded (S start_idx)) as [k [Hk_ge H_is_LWM]].
-    
-    assert (H_len_k_gt_M : length (f k) > M).
-    { apply H_growth_start. lia. }
-
-    set (HeadK := firstn M (f k)).
-    set (StableSuffix := skipn M (f k)).
-    
-    assert (H_decomp_k : f k = HeadK ++ StableSuffix).
-    { unfold HeadK, StableSuffix. symmetry. apply firstn_skipn. }
-    
-    (* Разложим f(k): firstn 1 - это голова (список из 1 буквы), skipn 1 - хвост *)
-    assert (H_headK_struct : exists l, HeadK = [l]).
+    (* Строим список LWM индексов *)
+    assert (H_seq_exists: forall n, exists (L : list nat), 
+      length L = n /\
+      Sorted lt L /\
+      NoDup L /\
+      (forall x, In x L -> is_low_water_mark f x) /\
+      (forall x y, In x L -> In y L -> x < y -> length (f x) < length (f y))).
     {
-      assert (L: length HeadK = 1). { unfold HeadK, M. apply firstn_length_le. lia. }
-      destruct HeadK as [| l0 tail0].
-      - inversion L.
-      - destruct tail0.
-        + exists l0. reflexivity.
-        + inversion L.
-    }
-    destruct H_headK_struct as [head_k H_headK_eq].
+      intro n. induction n.
+      - exists []. repeat split; try constructor; try contradiction.
+      - destruct IHn as [L [Hlen [Hsorted [Hnodup [HLwm HGrow]]]]].
+        
+        assert (exists k_prev, (L = [] \/ k_prev = last L 0) /\ (L <> [] -> is_low_water_mark f k_prev)).
+        {
+          destruct L as [| h t]. 
+          - (* L = [] *)
+            exists 0. split; [left; reflexivity | contradiction].
+          - (* L = h :: t *)
+            exists (last (h :: t) 0). 
+            split; [right; reflexivity | ].
+            intro H_not_nil. 
+            apply HLwm.
+            apply last_In_not_nil.
+            discriminate. 
+        }
 
-    (* Докажем, что StableSuffix сохраняется навсегда для t >= k *)
-    assert (H_stable : forall t, t >= k -> exists p, f t = p ++ StableSuffix).
-    {
-      intros t Ht.
-      rewrite H_headK_eq in H_decomp_k.
-      apply preserves_suffix_forever with (k := k) (l := head_k); assumption.
-    }
+        destruct H as [k_prev [Hprev_def Hprev_LWM]].
 
-    (* Последовательность uолов длины M *)
-    set (Heads := fun (delta : nat) => firstn M (f (k + delta))).
-    
-    (* Множество всех слов длины 1 - это просто буквы *)
-    set (AllWordsM := generate_words_of_length letter Finite_Sigma M).
-    
-    (* Принцип Дирихле *)
-    destruct (Infinite_Pigeonhole letter AllWordsM Heads) as [d1 [d2 [Hlt_d H_eq_heads]]].
-    - intro delta. unfold Heads, AllWordsM, M.
-      set (w := firstn 1 (f (k + delta))).
-      assert (H_len : 1 = length w).
-      {
-         unfold w. 
-         symmetry. 
-         apply firstn_length_le.
-         (* Докажем 1 <= length (f (k+delta)), используя LWM *)
-         transitivity (length (f k)).
-         * lia.
-         * apply H_is_LWM. lia.
-      }
-      rewrite H_len.
-      apply generate_words_complete.
-      apply Is_Finite.
+        assert (exists k_next, (L=[] -> is_low_water_mark f k_next) /\ 
+                               (L<>[] -> k_next > k_prev /\ length (f k_next) > length (f k_prev) /\ is_low_water_mark f k_next)).
+        {
+           destruct L.
+           - destruct (exists_LWM f Hchain Hunbounded 0) as [k0 [_ Hk0]].
+             exists k0. split; [intros _; exact Hk0 | contradiction].
+           - specialize (Hprev_LWM ltac:(discriminate)).
+             destruct (exists_next_growing_LWM f k_prev Hchain Hunbounded Hprev_LWM) as [kn [Hkn_gt [Hkn_len Hkn_lwm]]].
+             exists kn. split; [tauto | ]. 
+             intros _. repeat split; assumption.
+        }
+        destruct H as [k_next [Hbase Hstep]].
+        
+        (* Строим новый список: L ++ [k_next] *)
+        exists (L ++ [k_next]).
 
-   -  set (i := k + d1).
-      set (j := k + d2).
-      exists i, j.
-    
-      assert (H_idx_lt : i < j) by lia.
+        assert (H_new_sorted: Sorted lt (L ++ [k_next])).
+        {
+          apply sorted_snoc_max.
+          - assumption. 
+          - intros y Hy.
+            destruct L as [| h t].
+            -- inversion Hy.
+            -- specialize (Hstep ltac:(discriminate)). destruct Hstep as [H_next_gt_prev _].
+               destruct Hprev_def as [? | H_last_eq]; [discriminate | rewrite H_last_eq in H_next_gt_prev].
+               assert (H_y_le_last: y <= last (h::t) 0).
+               { apply sorted_last_max; assumption. }
+               lia.
+        }
 
-      assert (H_monotonic : forall n, length (f n) <= length (f (S n))).
-      { apply monotone_growth. assumption. }
-    
-      (* Конструируем части слова для отношения Турчина *)
-      (* f i = v ++ w' *)
-      (* f j = v ++ v' ++ w' *)
-      
-      set (v := firstn M (f i)).
-      set (w' := skipn M (f i)).
-      
-      (* v' - середина *)
-      set (v' := firstn (length (f j) - length v - length w') (skipn M (f j))).
-      unfold is_turchin_pair.
-      split.
-      { assumption. }
-      
-      exists v, v', w'.
-      repeat split.
-      
-      (* v <> [] *)
-      {
-         unfold v, M.
-         destruct (f i) as [| l_v t_v] eqn:Hfi.
-         
-         - (* f i = [] *)
-           exfalso.
-           apply (Hnonempty i). 
-           assumption.
-           
-         - (* f i = l :: t. Тогда v = [l] *)
-           simpl. 
-           discriminate.
-      }
+        repeat split.
+        
+        + (* Длина *) 
+          rewrite app_length, Hlen. simpl. lia.
+        + (* Сортировка *) 
+          exact H_new_sorted.
+        + (* NoDup *) 
+          apply Sorted_lt_implies_NoDup; assumption.
 
-      (* f(i) *)
-      { unfold v, w'. symmetry. apply firstn_skipn. }
-      
-      (* f(j) *)
-      {
-         (* Докажем, что w' сохраняется в f j *)
-         assert (H_w'_preserved : exists p, f j = p ++ w').
-         {
-            destruct (f i) as [| l_i tail_i] eqn:Hfi.
-            { exfalso. apply (Hnonempty i); auto. }
+        + (* LWM *)
+          intros x Hin. apply in_app_or in Hin. destruct Hin as [Hin | [Heq|F]].
+          * apply HLwm; assumption.
+          * subst. destruct L; [apply Hbase; reflexivity | apply Hstep; discriminate].
+          * contradiction.
+
+        + (* Рост длин *)
+          intros x y Hx Hy Hlt_xy.
+          apply in_app_or in Hx; apply in_app_or in Hy.
+          destruct Hx as [Hx|Hx], Hy as [Hy|Hy].
+          * apply HGrow; assumption.
+          * destruct Hy as [Heq | F]; [subst y | contradiction].
+            destruct L as [| h t] eqn:E_L; [inversion Hx |].
+            specialize (Hstep ltac:(discriminate)). destruct Hstep as [H_next_gt_prev [H_len_grow _]].
             
-            unfold w', M.
-            simpl. 
-            
-            (* Применяем лемму preserves_suffix_forever для tail_i *)
-            apply preserves_suffix_forever with (k:=i) (l:=l_i) (suffix:=tail_i).
-            - assumption.
-            - unfold is_low_water_mark. intros t0 Hge.
-              apply le_trans_induction_bases with (f:=fun n => length (f n)); try assumption.
-            - assumption.
-            - lia. 
-         }
+            (* Доказываем |f x| <= |f k_prev| *)
+            assert (H_len_x_le_prev: length (f x) <= length (f k_prev)).
+            {
+               destruct Hprev_def as [? | H_last_eq]; [discriminate | rewrite H_last_eq].
+               destruct (Nat.eq_dec x (last (h::t) 0)).
+               - (* x = last *)
+                 subst. apply le_n.
+               - (* x < last *)
+                 apply Nat.lt_le_incl.
+                 apply HGrow.
+                 + assumption.
+                 + apply last_In_not_nil.
+                   discriminate.
+                 + assert (x <= last (h::t) 0) by (apply sorted_last_max; assumption).
+                   lia.
+            }
+            lia.
+          * destruct Hx as [Heq | F]; [subst x | contradiction].
+            destruct L as [| h t].
+            -- inversion Hy.
+            -- specialize (Hstep ltac:(discriminate)). destruct Hstep as [H_next_gt_prev _].
+               destruct Hprev_def as [? | H_last_eq]; [discriminate | rewrite H_last_eq in H_next_gt_prev].
+               assert (y <= last (h::t) 0) by (apply sorted_last_max; assumption).
+               lia. 
+          * destruct Hx; destruct Hy; subst; try contradiction. lia.
+    }
 
-         destruct H_w'_preserved as [p_j H_fj_eq].
-
-         assert (L_pj_ge_M : length p_j >= M).
-         {
-             unfold M.
-             assert (Lj : length (f j) = length p_j + length w').
-             { rewrite H_fj_eq, app_length. reflexivity. }
-             
-             assert (Li : length (f i) = M + length w').
-             {
-                unfold w'.
-                rewrite <- (firstn_skipn M (f i)) at 1.
-                rewrite app_length.
-                f_equal.
-                apply firstn_length_le.
-                transitivity (length (f k)).
-                - unfold M in *. lia.
-                - apply H_is_LWM. lia.
-             }
-             
-             assert (Hgrow: length (f j) >= length (f i)).
-             { 
-                apply le_trans_induction_bases with (f:=fun n => length (f n)).
-                - lia.
-                - exact H_monotonic.
-             }
-             
-             unfold M in *. 
-             lia.
-         }
-         
-         (*  Докажем, что p_j начинается с v *)
-         assert (H_head_j : firstn M p_j = v).
-         { 
-           assert (H_heads_eq: firstn M (f j) = v).
-           { unfold v, i, j. unfold Heads in H_eq_heads. symmetry. apply H_eq_heads. }
-           
-           rewrite H_fj_eq in H_heads_eq.
-           rewrite firstn_app in H_heads_eq.
-           replace (M - length p_j) with 0 in H_heads_eq by lia.
-           rewrite app_nil_r in H_heads_eq.
-           assumption.
-         }
-         
-         rewrite H_fj_eq. 
-         
-         rewrite <- (firstn_skipn M p_j) at 1.
-         rewrite H_head_j.
-         
-         rewrite app_assoc. 
-         f_equal. 
-         
-         (* Раскроем v' и упростим *)
-         unfold v'.
-         rewrite H_fj_eq.
-         
-         rewrite skipn_app.
-         assert (H_diff_zero: M - length p_j = 0) by (unfold M in *; lia).
-         rewrite H_diff_zero.
-         simpl.
-         f_equal.
-         
-         (* Чтобы упростить skipn M p_j при M=1, нужно разобрать p_j *)
-         destruct p_j as [| h_pj t_pj].
-         { unfold M in L_pj_ge_M. simpl in L_pj_ge_M. lia. }
-         
-         unfold M in *. 
-         
-         (* length v = 1 избавит от match в цели *)
-         assert (Len_v : length v = 1).
-         {
-            unfold v. rewrite firstn_length_le; [reflexivity|].
-            transitivity (length (f k)); [lia | apply H_is_LWM; lia].
-         }
-         
-         rewrite Len_v.
-         simpl.
-         
-         rewrite app_length.
-         replace (length t_pj + length w' - 0 - length w') with (length t_pj) by lia.
-         
-         rewrite firstn_app.
-         rewrite firstn_all.
-         replace (length t_pj - length t_pj) with 0 by lia.
-         simpl.
-         rewrite app_nil_r.
-         
-         reflexivity.
-      }
-
-      (* Хвост сохраняется *)
-      {
-         intros step H_step_range.
-         unfold tail_preserved.
-         
-         (* Разбираем структуру f i *)
-         destruct (f i) as [| li ti] eqn:Hfi.
-         { exfalso. apply (Hnonempty i); auto. }
-         
-         (* Разложение для f step *)
-         assert (H_step_decomp : exists p, f step = p ++ w').
-         {
-             unfold w', M.
-             simpl.
-             apply preserves_suffix_forever with (k:=i) (l:=li) (suffix:=ti).
-             - assumption.
-             
-             - unfold is_low_water_mark. intros t0 Hge.
-               apply le_trans_induction_bases with (f:=fun n => length(f n)); [lia | exact H_monotonic].
-               
-             - exact Hfi.
-             - lia.
-         }
-         destruct H_step_decomp as [p_step H_step_eq].
-         
-         (* Разбираем шаг грамматики *)
-         specialize (Hchain step).
-         inversion Hchain as [l0 rhs0 tail0 Hin Hfstep Hfnext].
-         
-         (*  Докажем, что p_step не пустой *)
-         destruct p_step as [| h_p t_p].
-         { 
-           exfalso.
-           assert (L: length (f step) >= length (f i)). 
-           { apply le_trans_induction_bases with (f:=fun n => length(f n)); [lia | exact H_monotonic]. }
-           
-           rewrite H_step_eq in L. simpl in L.
-           rewrite Hfi in L. unfold w', M in L. simpl in L.
-           lia. 
-         }
-         
-         exists l0, rhs0, t_p.
-         repeat split; try assumption.
-         
-         - (* Равенство для f step *)
-           rewrite Hfstep. rewrite H_step_eq.
-           rewrite H_step_eq in Hfstep.
-           injection Hfstep as Hl0 Htail0.
-           subst.
-           reflexivity.
-           
-         - (* Равенство для f (S step) *)
-           rewrite Hfnext.
-           f_equal.
-           rewrite H_step_eq in Hfstep.
-           injection Hfstep as _ Hres.
-           rewrite <- Hres.
-           symmetry. 
-           exact Hfnext. 
-      }
-  Qed.
-  
-  (* BAD SEQUENCE -> BOUNDED *)
-
-  Definition IsBadSequence (f : nat -> word letter) : Prop :=
-    forall i j, i < j -> ~ is_turchin_pair G f i j.
-
-  (* Если последовательность плохая, она ограничена. *)
-  Theorem Bad_Sequence_Is_Bounded :
-    forall f,
-    chain G f ->
-    (forall n, f n <> []) ->
-    IsBadSequence f ->
-    exists Bound, forall n, length (f n) <= Bound.
-  Proof.
-    intros f Hchain Hnonil Hbad.
-    (* Доказажем от противного *)
-    apply NNPP.
-    intro H_not_bounded.
+    (* Применяем принцип Дирихле (список L с длиной |Sigma|+1) *)
+    destruct (H_seq_exists (S (length Finite_Sigma))) as [L [Hlen [Hsorted [Hnodup [HLwm HGrow]]]]].
     
-    (* Докажем монотонность роста длины *)
-    assert (H_mono_step : forall n, length (f n) <= length (f (S n))).
+    destruct Finite_Sigma as [|d0 rest] eqn:E_Sigma.
+    { 
+      simpl in Hlen. destruct L as [|k L']; [discriminate|].
+      specialize (Hnonempty k).
+      remember (f k) as word_k eqn:Heq_word.
+      destruct word_k as [|bad_char rest_w].
+      - subst. contradiction. 
+      - pose proof (Is_Finite bad_char) as Hin_sigma. inversion Hin_sigma.
+    }
+    set (get_head_safe := fun k => match f k with | [] => d0 | h::_ => h end).
+    
+    assert (H_collision: exists k1 k2, In k1 L /\ In k2 L /\ k1 <> k2 /\ get_head_safe k1 = get_head_safe k2).
     {
-      apply monotone_growth.
+      rewrite <- E_Sigma in Is_Finite.
+      rewrite <- E_Sigma in Hlen.
+      apply (@Pigeonhole_Finite_Sigma letter letter_eq_dec Finite_Sigma Is_Finite nat L get_head_safe).
+      - assumption.
+      - rewrite Hlen. lia.
+    }
+    
+    destruct H_collision as [ka [kb [Hina [Hinb [Hneq H_head_eq]]]]].
+    
+    (* Упорядочиваем пару *)
+    assert (H_found_pair: exists k1 k2, In k1 L /\ In k2 L /\ k1 < k2 /\ get_head_safe k1 = get_head_safe k2).
+    {
+       destruct (lt_eq_lt_dec ka kb) as [[Hlt | Heq] | Hgt].
+       - exists ka, kb. repeat split; assumption.
+       - contradiction. 
+       - exists kb, ka. repeat split; try assumption. symmetry. assumption.
+    }
+    
+    destruct H_found_pair as [k1 [k2 [Hin_k1 [Hin_k2 [Hlt Hhead_eq_safe]]]]].
+    
+    (* Строим пару Турчина *)
+    exists k1, k2.
+    unfold is_turchin_pair.
+    split; [assumption |].
+    
+    pose proof (Hnonempty k1) as Hne1.
+    pose proof (Hnonempty k2) as Hne2.
+    destruct (f k1) as [| h1 t1] eqn:E1; [contradiction|].
+    destruct (f k2) as [| h2 t2] eqn:E2; [contradiction|].
+    
+    unfold get_head_safe in Hhead_eq_safe.
+    rewrite E1, E2 in Hhead_eq_safe.
+    subst h2. 
+    
+    exists [h1]. (* v *)
+    
+    (* Докажем сохранение хвоста t1 *)
+    assert (H_decomposition: exists v_mid, t2 = v_mid ++ t1).
+    { 
+      assert (H_ge: k2 >= k1) by lia.
+      pose proof (LWM_implies_trace_preservation f k1 h1 t1 Hchain (HLwm k1 Hin_k1) E1 k2 H_ge) as H_pres.
+      unfold tail_preserved in H_pres.
+      destruct H_pres as [l_tmp [rhs_tmp [mid [_ [H_fk2_struct _]]]]].
+      rewrite E2 in H_fk2_struct.
+      injection H_fk2_struct as H_tmp_head_eq H_tail_eq.
+      exists mid. assumption. 
+    }
+    destruct H_decomposition as [v_mid H_mid].
+    
+    exists v_mid, t1.
+    
+    repeat split.
+    - intro Hnil. discriminate.
+    - rewrite H_mid. simpl. reflexivity.
+    - intros k Hk_range.
+      assert (H_ge: k >= k1) by lia.
+      apply (LWM_implies_trace_preservation f k1 h1 t1 Hchain (HLwm k1 Hin_k1) E1).
       assumption.
-    }
-
-    (* Преобразуем отрицание Bounded в условие неограниченного роста *)
-    
-    (* Докажем посылку для теоремы Growth -> Turchin Pair *)
-    assert (H_growth_condition: forall N, exists i, forall j, j > i -> length (f j) > N).
-    {
-       intro N.
-       destruct (classic (exists i, length (f i) > N)) as [H_exists | H_not_exists].
-       - (* существует i, где длина > N *)
-         destruct H_exists as [i H_gt].
-         exists i.
-         intros j H_j_gt_i.
-         (* j > i, тогда |f j| >= |f i| > N *)
-         assert (H_ge: length (f i) <= length (f j)).
-         { 
-           apply (le_trans_induction_bases (fun n => length (f n)) i j).
-           - lia.
-           - exact H_mono_step.
-         }
-         lia.
-       - (* не существует такого i, тогда противоречие H_not_bounded*)
-         exfalso.
-         apply H_not_bounded.
-         exists N.
-         intro n.
-         apply not_ex_all_not with (n:=n) in H_not_exists.
-         lia.
-    }
-    
-    (* Применяем теорему Growth -> Turchin Pair*)
-    pose proof (Growth_Implies_Turchin_Pair f Hchain Hnonil H_growth_condition) as [i [j Hpair]].
-    
-    (* Противоречие с определением BadSequence *)
-    unfold IsBadSequence in Hbad.
-    apply (Hbad i j).
-    - unfold is_turchin_pair in Hpair. lia.
-    - assumption.
   Qed.
 
 End Growth_Proof.
-
-
